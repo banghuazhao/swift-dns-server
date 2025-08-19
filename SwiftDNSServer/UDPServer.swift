@@ -150,19 +150,40 @@ final class UDPServer: UDPServerProtocol {
     }
 
     private func handleReceivedData(_ data: Data, from connection: NWConnection) {
-        let message = String(data: data, encoding: .utf8) ?? "Invalid data"
-        print("📨 Received from \(connection.endpoint): \(message)")
+        // For this stage, respond with a 12-byte DNS header with fixed, expected values
+        // ID: 1234, QR: 1, OPCODE: 0, AA: 0, TC: 0, RD: 0, RA: 0, Z: 0, RCODE: 0
+        // QDCOUNT/ANCOUNT/NSCOUNT/ARCOUNT: 0
+        do {
+            // Echo the incoming packet's ID to satisfy clients like dig
+            let incomingId = (try? data.readUInt16BE(at: 0)) ?? 0
+            let header = DNSHeader(
+                id: incomingId,
+                isResponse: true,
+                opcode: .query,
+                isAuthoritativeAnswer: false,
+                isTruncated: false,
+                recursionDesired: false,
+                recursionAvailable: false,
+                z: 0,
+                responseCode: .noError,
+                questionCount: 0,
+                answerRecordCount: 0,
+                authorityRecordCount: 0,
+                additionalRecordCount: 0
+            )
 
-        let response = "Server received: \(message)"
-        let responseData = response.data(using: .utf8) ?? Data()
+            let responseData = try header.serialize()
 
-        connection.send(content: responseData, completion: .contentProcessed { error in
-            if let error = error {
-                print("❌ Send error: \(error)")
-            } else {
-                print("✅ Response sent successfully to \(connection.endpoint)")
-            }
-        })
+            connection.send(content: responseData, completion: .contentProcessed { error in
+                if let error = error {
+                    print("❌ Send error: \(error)")
+                } else {
+                    print("✅ DNS header response sent to \(connection.endpoint)")
+                }
+            })
+        } catch {
+            print("❌ Failed to serialize DNS header: \(error)")
+        }
     }
 
     private func removeConnection(_ connection: NWConnection) {
